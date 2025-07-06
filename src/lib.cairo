@@ -1,32 +1,51 @@
-/// Interface representing `HelloContract`.
-/// This interface allows modification and retrieval of the contract balance.
+/// Interface for StarkBay: a decentralized multi-vendor e-commerce marketplace.
+/// Allows sellers to register shops and buyers to view registered shops.
 #[starknet::interface]
-pub trait IHelloStarknet<TContractState> {
-    /// Increase contract balance.
-    fn increase_balance(ref self: TContractState, amount: felt252);
-    /// Retrieve contract balance.
-    fn get_balance(self: @TContractState) -> felt252;
+pub trait IStarkBay<TContractState> {
+    /// Register a new shop with a name.
+    fn register_shop(ref self: TContractState, shop_name: felt252);
+    /// Get the total number of registered shops.
+    fn get_shop_count(self: @TContractState) -> u64;
+    /// Get shop info (name, owner) by index.
+    fn get_shop_by_index(self: @TContractState, index: u64) -> (felt252, starknet::ContractAddress);
 }
 
-/// Simple contract for managing balance.
+/// StarkBay contract: minimal multi-vendor marketplace.
 #[starknet::contract]
-mod HelloStarknet {
-    use starknet::storage::{StoragePointerReadAccess, StoragePointerWriteAccess};
+pub mod StarkBay {
+    use starknet::ContractAddress;
+    use starknet::get_caller_address;
+    use starknet::storage::*;
+
+    #[derive(Drop, Serde, starknet::Store)]
+    pub struct Shop {
+        name: felt252,
+        owner: ContractAddress,
+    }
 
     #[storage]
-    struct Storage {
-        balance: felt252,
+    pub struct Storage {
+        shops: Vec<Shop>,
     }
 
     #[abi(embed_v0)]
-    impl HelloStarknetImpl of super::IHelloStarknet<ContractState> {
-        fn increase_balance(ref self: ContractState, amount: felt252) {
-            assert(amount != 0, 'Amount cannot be 0');
-            self.balance.write(self.balance.read() + amount);
+    pub impl StarkBayImpl of super::IStarkBay<ContractState> {
+        /// Register a new shop with the caller as owner.
+        fn register_shop(ref self: ContractState, shop_name: felt252) {
+            let caller = get_caller_address();
+            let shop = Shop { name: shop_name, owner: caller };
+            self.shops.append().write(shop);
         }
 
-        fn get_balance(self: @ContractState) -> felt252 {
-            self.balance.read()
+        /// Get the total number of registered shops.
+        fn get_shop_count(self: @ContractState) -> u64 {
+            self.shops.len()
+        }
+
+        /// Get shop info (name, owner) by index.
+        fn get_shop_by_index(self: @ContractState, index: u64) -> (felt252, ContractAddress) {
+            let shop = self.shops.at(index).read();
+            (shop.name, shop.owner)
         }
     }
 }

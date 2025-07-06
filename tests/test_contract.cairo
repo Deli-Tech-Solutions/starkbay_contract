@@ -1,47 +1,44 @@
+// Integration test for the StarkBay contract
+use starkbay_contract::{StarkBay, IStarkBayDispatcher, IStarkBayDispatcherTrait};
+use snforge_std::{declare, ContractClassTrait, DeclareResultTrait};
+use snforge_std::{start_cheat_caller_address, stop_cheat_caller_address};
 use starknet::ContractAddress;
 
-use snforge_std::{declare, ContractClassTrait, DeclareResultTrait};
-
-use starkbay_contract::IHelloStarknetSafeDispatcher;
-use starkbay_contract::IHelloStarknetSafeDispatcherTrait;
-use starkbay_contract::IHelloStarknetDispatcher;
-use starkbay_contract::IHelloStarknetDispatcherTrait;
-
-fn deploy_contract(name: ByteArray) -> ContractAddress {
-    let contract = declare(name).unwrap().contract_class();
-    let (contract_address, _) = contract.deploy(@ArrayTrait::new()).unwrap();
-    contract_address
+// Helper function to deploy the contract and return a dispatcher
+fn deploy_starkbay() -> IStarkBayDispatcher {
+    let contract = declare("StarkBay").unwrap().contract_class();
+    // No constructor args
+    let (contract_address, _) = contract.deploy(@array![]).unwrap();
+    IStarkBayDispatcher { contract_address }
 }
 
 #[test]
-fn test_increase_balance() {
-    let contract_address = deploy_contract("HelloStarknet");
+fn test_register_and_query_shops() {
+    let dispatcher = deploy_starkbay();
 
-    let dispatcher = IHelloStarknetDispatcher { contract_address };
+    // Register first shop as seller1
+    let seller1: ContractAddress = 123.try_into().unwrap();
+    start_cheat_caller_address(dispatcher.contract_address, seller1);
+    dispatcher.register_shop('ShopOne');
+    stop_cheat_caller_address(dispatcher.contract_address);
 
-    let balance_before = dispatcher.get_balance();
-    assert(balance_before == 0, 'Invalid balance');
+    // Register second shop as seller2
+    let seller2: ContractAddress = 456.try_into().unwrap();
+    start_cheat_caller_address(dispatcher.contract_address, seller2);
+    dispatcher.register_shop('ShopTwo');
+    stop_cheat_caller_address(dispatcher.contract_address);
 
-    dispatcher.increase_balance(42);
+    // Assert shop count is 2
+    let count = dispatcher.get_shop_count();
+    assert(count == 2, 'Shop count should be 2');
 
-    let balance_after = dispatcher.get_balance();
-    assert(balance_after == 42, 'Invalid balance');
-}
+    // Assert first shop info
+    let (name1, owner1) = dispatcher.get_shop_by_index(0);
+    assert(name1 == 'ShopOne', 'First shop name mismatch');
+    assert(owner1 == seller1, 'First shop owner mismatch');
 
-#[test]
-#[feature("safe_dispatcher")]
-fn test_cannot_increase_balance_with_zero_value() {
-    let contract_address = deploy_contract("HelloStarknet");
-
-    let safe_dispatcher = IHelloStarknetSafeDispatcher { contract_address };
-
-    let balance_before = safe_dispatcher.get_balance().unwrap();
-    assert(balance_before == 0, 'Invalid balance');
-
-    match safe_dispatcher.increase_balance(0) {
-        Result::Ok(_) => core::panic_with_felt252('Should have panicked'),
-        Result::Err(panic_data) => {
-            assert(*panic_data.at(0) == 'Amount cannot be 0', *panic_data.at(0));
-        }
-    };
+    // Assert second shop info
+    let (name2, owner2) = dispatcher.get_shop_by_index(1);
+    assert(name2 == 'ShopTwo', 'Second shop name mismatch');
+    assert(owner2 == seller2, 'Second shop owner mismatch');
 }
