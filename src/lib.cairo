@@ -1,21 +1,49 @@
-/// Interface for StarkBay: a decentralized multi-vendor e-commerce marketplace.
-/// Allows sellers to register shops and buyers to view registered shops.
+use starknet::ContractAddress;
+use starknet::storage::*;
+use starknet::get_caller_address;
+
+// Interface for StarkBay, now with product listing
 #[starknet::interface]
 pub trait IStarkBay<TContractState> {
-    /// Register a new shop with a name.
+    // Shop management
     fn register_shop(ref self: TContractState, shop_name: felt252);
-    /// Get the total number of registered shops.
     fn get_shop_count(self: @TContractState) -> u64;
-    /// Get shop info (name, owner) by index.
-    fn get_shop_by_index(self: @TContractState, index: u64) -> (felt252, starknet::ContractAddress);
+    fn get_shop_by_index(self: @TContractState, index: u64) -> (felt252, ContractAddress);
+
+    // Product management
+    fn add_product(
+        ref self: TContractState,
+        shop_index: u64,
+        name: felt252,
+        description: felt252,
+        price: u128,
+        quantity: u64,
+    );
+    fn update_product(
+        ref self: TContractState,
+        shop_index: u64,
+        product_id: u64,
+        name: felt252,
+        description: felt252,
+        price: u128,
+        quantity: u64,
+    );
+    fn remove_product(ref self: TContractState, shop_index: u64, product_id: u64);
+    fn get_product(
+        self: @TContractState,
+        shop_index: u64,
+        product_id: u64,
+    ) -> (felt252, felt252, u128, u64);
+    fn get_product_count(self: @TContractState, shop_index: u64) -> u64;
 }
 
-/// StarkBay contract: minimal multi-vendor marketplace.
+// Main contract module
 #[starknet::contract]
 pub mod StarkBay {
+    use super::*;
     use starknet::ContractAddress;
-    use starknet::get_caller_address;
     use starknet::storage::*;
+    use starknet::get_caller_address;
 
     #[derive(Drop, Serde, starknet::Store)]
     pub struct Shop {
@@ -23,29 +51,160 @@ pub mod StarkBay {
         owner: ContractAddress,
     }
 
+    #[derive(Drop, Serde, starknet::Store)]
+    pub struct Product {
+        id: u64,
+        name: felt252,
+        description: felt252,
+        price: u128,
+        quantity: u64,
+    }
+
     #[storage]
     pub struct Storage {
         shops: Vec<Shop>,
+        // Mapping: shop_index => Vec<Product>
+        products: Map<u64, Vec<Product>>,
+        // Mapping: shop_index => next product id
+        next_product_id: Map<u64, u64>,
+    }
+
+    #[event]
+    #[derive(Drop, starknet::Event)]
+    pub enum Event {
+        ProductAdded: ProductAdded,
+        ProductUpdated: ProductUpdated,
+        ProductRemoved: ProductRemoved,
+    }
+
+    #[derive(Drop, starknet::Event)]
+    pub struct ProductAdded {
+        shop_index: u64,
+        product_id: u64,
+        name: felt252,
+    }
+
+    #[derive(Drop, starknet::Event)]
+    pub struct ProductUpdated {
+        shop_index: u64,
+        product_id: u64,
+        name: felt252,
+    }
+
+    #[derive(Drop, starknet::Event)]
+    pub struct ProductRemoved {
+        shop_index: u64,
+        product_id: u64,
     }
 
     #[abi(embed_v0)]
     pub impl StarkBayImpl of super::IStarkBay<ContractState> {
-        /// Register a new shop with the caller as owner.
+        // --- Shop Management (existing) ---
         fn register_shop(ref self: ContractState, shop_name: felt252) {
             let caller = get_caller_address();
             let shop = Shop { name: shop_name, owner: caller };
             self.shops.append().write(shop);
         }
 
-        /// Get the total number of registered shops.
         fn get_shop_count(self: @ContractState) -> u64 {
             self.shops.len()
         }
 
-        /// Get shop info (name, owner) by index.
         fn get_shop_by_index(self: @ContractState, index: u64) -> (felt252, ContractAddress) {
             let shop = self.shops.at(index).read();
             (shop.name, shop.owner)
+        }
+
+        // --- Product Management (new) ---
+        fn add_product(
+            ref self: ContractState,
+            shop_index: u64,
+            name: felt252,
+            description: felt252,
+            price: u128,
+            quantity: u64,
+        ) {
+            let caller = get_caller_address();
+            let shop = self.shops.at(shop_index).read();
+            assert(shop.owner == caller, 'Only owner can add products');
+
+            let product_id = self.next_product_id.entry(shop_index).read();
+            let product = Product {
+                id: product_id,
+                name,
+                description,
+                price,
+                quantity,
+            };
+            self.products.entry(shop_index).append().write(product);
+            self.next_product_id.entry(shop_index).write(product_id + 1);
+
+            self.emit(Event::ProductAdded(ProductAdded {
+                shop_index,
+                product_id,
+                name,
+            }));
+        }
+
+        fn update_product(
+            ref self: ContractState,
+            shop_index: u64,
+            product_id: u64,
+            name: felt252,
+            description: felt252,
+            price: u128,
+            quantity: u64,
+        ) {
+            let caller = get_caller_address();
+            let shop = self.shops.at(shop_index).read();
+            assert(shop.owner == caller, 'Only owner can update products');
+
+            let mut products = self.products.entry(shop_index);
+            let mut product = products.at(product_id).read();
+            product.name = name;
+            product.description = description;
+            product.price = price;
+            product.quantity = quantity;
+            products.at(product_id).write(product);
+
+            self.emit(Event::ProductUpdated(ProductUpdated {
+                shop_index,
+                product_id,
+                name,
+            }));
+        }
+
+        fn remove_product(ref self: ContractState, shop_index: u64, product_id: u64) {
+            let caller = get_caller_address();
+            let shop = self.shops.at(shop_index).read();
+            assert(shop.owner == caller, 'Only owner can remove products');
+
+            let mut products = self.products.entry(shop_index);
+            // Remove by setting to a default product (could be improved with a more advanced data structure)
+            let mut product = products.at(product_id).read();
+            product.name = 0;
+            product.description = 0;
+            product.price = 0;
+            product.quantity = 0;
+            products.at(product_id).write(product);
+
+            self.emit(Event::ProductRemoved(ProductRemoved {
+                shop_index,
+                product_id,
+            }));
+        }
+
+        fn get_product(
+            self: @ContractState,
+            shop_index: u64,
+            product_id: u64,
+        ) -> (felt252, felt252, u128, u64) {
+            let product = self.products.entry(shop_index).at(product_id).read();
+            (product.name, product.description, product.price, product.quantity)
+        }
+
+        fn get_product_count(self: @ContractState, shop_index: u64) -> u64 {
+            self.products.entry(shop_index).len()
         }
     }
 }
