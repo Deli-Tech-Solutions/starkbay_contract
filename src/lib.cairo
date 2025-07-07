@@ -1,41 +1,9 @@
 use starknet::ContractAddress;
 use starknet::storage::*;
 use starknet::get_caller_address;
-
-// Interface for StarkBay, now with product listing
-#[starknet::interface]
-pub trait IStarkBay<TContractState> {
-    // Shop management
-    fn register_shop(ref self: TContractState, shop_name: felt252);
-    fn get_shop_count(self: @TContractState) -> u64;
-    fn get_shop_by_index(self: @TContractState, index: u64) -> (felt252, ContractAddress);
-
-    // Product management
-    fn add_product(
-        ref self: TContractState,
-        shop_index: u64,
-        name: felt252,
-        description: felt252,
-        price: u128,
-        quantity: u64,
-    );
-    fn update_product(
-        ref self: TContractState,
-        shop_index: u64,
-        product_id: u64,
-        name: felt252,
-        description: felt252,
-        price: u128,
-        quantity: u64,
-    );
-    fn remove_product(ref self: TContractState, shop_index: u64, product_id: u64);
-    fn get_product(
-        self: @TContractState,
-        shop_index: u64,
-        product_id: u64,
-    ) -> (felt252, felt252, u128, u64);
-    fn get_product_count(self: @TContractState, shop_index: u64) -> u64;
-}
+mod interface;
+use interface::IStarkBay;
+pub use interface::{IStarkBayDispatcher, IStarkBayDispatcherTrait};
 
 // Main contract module
 #[starknet::contract]
@@ -98,7 +66,7 @@ pub mod StarkBay {
     }
 
     #[abi(embed_v0)]
-    pub impl StarkBayImpl of super::IStarkBay<ContractState> {
+    pub impl StarkBayImpl of IStarkBay<ContractState> {
         // --- Shop Management (existing) ---
         fn register_shop(ref self: ContractState, shop_name: felt252) {
             let caller = get_caller_address();
@@ -205,6 +173,32 @@ pub mod StarkBay {
 
         fn get_product_count(self: @ContractState, shop_index: u64) -> u64 {
             self.products.entry(shop_index).len()
+        }
+
+        fn list_shops(self: @ContractState, start: u64, count: u64) -> Array<(felt252, ContractAddress)> {
+            let mut result = array![];
+            let total = self.shops.len();
+            let end = if start + count > total { total } else { start + count };
+            let mut i = start;
+            while i < end {
+                let shop = self.shops.at(i).read();
+                result.append((shop.name, shop.owner));
+                i = i + 1;
+            };
+            result
+        }
+
+        fn list_products(self: @ContractState, shop_index: u64, start: u64, count: u64) -> Array<(u64, felt252, felt252, u128, u64)> {
+            let mut result = array![];
+            let total = self.products.entry(shop_index).len();
+            let end = if start + count > total { total } else { start + count };
+            let mut i = start;
+            while i < end {
+                let product = self.products.entry(shop_index).at(i).read();
+                result.append((product.id, product.name, product.description, product.price, product.quantity));
+                i = i + 1;
+            };
+            result
         }
     }
 }
