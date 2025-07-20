@@ -1,5 +1,6 @@
 // Integration test for the StarkBay contract
-use starkbay_contract::{StarkBay, IStarkBayDispatcher, IStarkBayDispatcherTrait};
+use starkbay_contract::starkbay::StarkBay::StarkBay::{StarkBay};
+use starkbay_contract::interfaces::IStarkBay::{IStarkBayDispatcher, IStarkBayDispatcherTrait};
 use snforge_std::{declare, ContractClassTrait, DeclareResultTrait};
 use snforge_std::{start_cheat_caller_address, stop_cheat_caller_address, spy_events, EventSpyAssertionsTrait};
 use starknet::ContractAddress;
